@@ -33,6 +33,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from sklearn.pipeline import Pipeline
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 # %%
@@ -52,6 +54,7 @@ def subir_csv_si_hace_falta(ruta_csv):
         return ruta_csv
 
     try:
+        # pyrefly: ignore [missing-import]
         from google.colab import files
 
         print("Selecciona pd_speech_features.csv desde tu computadora.")
@@ -143,20 +146,27 @@ def calcular_metricas(y_real, y_pred, y_proba):
 
 
 def imprimir_metricas(nombre, metricas):
-    print(f"\n{nombre}")
+    print(f"\n{'='*50}")
+    print(f" METRICAS: {nombre.upper()}")
+    print(f"{'='*50}")
     for metrica, valor in metricas.items():
-        print(f"{metrica}: {valor:.3f}")
+        nombre_metrica = metrica.replace('_', ' ').title()
+        print(f"  {nombre_metrica:<20}: {valor:.4f}")
 
 
 def imprimir_distribucion(nombre, datos):
     sujetos = datos[[ID, TARGET]].drop_duplicates()
-    print(f"\n{nombre}")
-    print("Filas:", len(datos))
-    print("Sujetos:", datos[ID].nunique())
-    print("Distribucion por filas:")
-    print(datos[TARGET].value_counts().sort_index())
-    print("Distribucion por sujetos:")
-    print(sujetos[TARGET].value_counts().sort_index())
+    print(f"\n{'-'*50}")
+    print(f" DISTRIBUCION: {nombre.upper()}")
+    print(f"{'-'*50}")
+    print(f"  Filas totales:   {len(datos)}")
+    print(f"  Sujetos unicos:  {datos[ID].nunique()}")
+    print("\n  Distribucion de clases (por fila):")
+    for clase, cuenta in datos[TARGET].value_counts().sort_index().items():
+        print(f"    Clase {clase}: {cuenta} muestras")
+    print("\n  Distribucion de clases (por sujeto):")
+    for clase, cuenta in sujetos[TARGET].value_counts().sort_index().items():
+        print(f"    Clase {clase}: {cuenta} sujetos")
 
 
 def validar_con_groupkfold(datos_train):
@@ -202,7 +212,7 @@ def evaluar_en_test(train, test):
         zero_division=0,
     )
 
-    return metricas, matriz, reporte, modelo
+    return metricas, matriz, reporte, modelo, y_test, proba
 
 
 def mostrar_importancias(modelo_entrenado, columnas):
@@ -214,49 +224,124 @@ def mostrar_importancias(modelo_entrenado, columnas):
         }
     ).sort_values("importancia", ascending=False)
 
-    print("\nVariables mas importantes:")
-    print(ranking.head(25).to_string(index=False))
+    print("\nVariables mas importantes (Top 10):")
+    print(ranking.head(10).to_string(index=False))
+    return ranking
+
+
+def graficar_matriz_confusion(matriz, titulo="Matriz de Confusion"):
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(matriz, annot=True, fmt='d', cmap='Blues',
+                xticklabels=["Control", "Parkinson"],
+                yticklabels=["Control", "Parkinson"])
+    plt.title(titulo)
+    plt.ylabel("Etiqueta Real")
+    plt.xlabel("Prediccion")
+    plt.tight_layout()
+    plt.show()
+
+
+def graficar_importancia_variables(ranking, top_n=20, titulo="Top Variables Mas Importantes"):
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=ranking.head(top_n), x='importancia', y='variable', hue='variable', legend=False, palette='viridis')
+    plt.title(titulo)
+    plt.xlabel("Importancia")
+    plt.ylabel("Variable")
+    plt.tight_layout()
+    plt.show()
+
+
+def graficar_curva_roc(y_real, y_proba, titulo="Curva ROC"):
+    plt.figure(figsize=(6, 6))
+    from sklearn.metrics import RocCurveDisplay
+    RocCurveDisplay.from_predictions(y_real, y_proba, color='darkorange')
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+    plt.title(titulo)
+    plt.tight_layout()
+    plt.show()
 
 
 # %%
+print("\n" + "="*80)
+print(" 1. CARGA Y LIMPIEZA DE DATOS ")
+print("="*80)
+print("-> Cargando el archivo CSV y realizando limpieza inicial de datos faltantes.")
+print("-> Objetivo: Detectar Parkinson (clase 1) vs Control (clase 0) usando voz.")
 datos = cargar_datos(RUTA_CSV)
 
-print("Dataset cargado")
-print("Filas:", len(datos))
-print("Columnas:", datos.shape[1])
-print("Sujetos:", datos[ID].nunique())
-print("Grabaciones por sujeto:")
-print(datos.groupby(ID).size().value_counts().sort_index())
+print(f"\n{'='*50}")
+print(" RESUMEN DEL DATASET")
+print(f"{'='*50}")
+print(f"  Filas totales:     {len(datos)}")
+print(f"  Columnas totales:  {datos.shape[1]}")
+print(f"  Sujetos unicos:    {datos[ID].nunique()}")
+print("\n  Grabaciones por sujeto:")
+for grabaciones, cuenta in datos.groupby(ID).size().value_counts().sort_index().items():
+    print(f"    {cuenta} sujetos tienen {grabaciones} grabaciones")
 
 imprimir_distribucion("Dataset completo", datos)
 
 
 # %%
+print("\n" + "="*80)
+print(" 2. SEPARACIÓN DE DATOS (TRAIN / TEST) ")
+print("="*80)
+print("-> Se separan los datos en Entrenamiento (Train) y Prueba (Test).")
+print("-> IMPORTANTE: Se usa 'GroupShuffleSplit' agrupando por 'id' de paciente.")
+print("-> Esto evita 'fuga de datos', asegurando que un mismo paciente NO esté")
+print("-> simultáneamente en Train y en Test, obligando al modelo a generalizar.")
 train, test = separar_train_test_agrupado(datos)
 
-imprimir_distribucion("Train agrupado por id", train)
-imprimir_distribucion("Test agrupado por id", test)
+imprimir_distribucion("Distribución en Entrenamiento (Train)", train)
+imprimir_distribucion("Distribución en Prueba (Test)", test)
 
 
 # %%
+print("\n" + "="*80)
+print(" 3. VALIDACIÓN CRUZADA EN ENTRENAMIENTO (5 FOLDS) ")
+print("="*80)
+print("-> Entrenando el Pipeline (Imputación + ExtraTreesClassifier).")
+print("-> Se simula el entrenamiento dividiendo los datos en 5 pliegues (Folds).")
+print("-> Sirve para ver qué tan estable es el modelo antes de la prueba final.")
 metricas_cv, matriz_cv = validar_con_groupkfold(train)
 
-imprimir_metricas("Validacion cruzada agrupada por id", metricas_cv)
+imprimir_metricas("Promedio de Validación Cruzada (CV)", metricas_cv)
 
-print("\nMatriz de confusion CV:")
-print(matriz_cv)
+print("\n-> GRAFICANDO: Matriz de Confusión de Validación Cruzada.")
+print("   (Muestra cuántos aciertos y errores hubo en los Folds)")
+graficar_matriz_confusion(matriz_cv, titulo="Matriz de Confusion (CV Agrupada)")
 
 
 # %%
-metricas_test, matriz_test, reporte_test, modelo_final = evaluar_en_test(train, test)
+print("\n" + "="*80)
+print(" 4. EVALUACIÓN FINAL DEL MODELO EN DATOS DE PRUEBA (TEST) ")
+print("="*80)
+print("-> Entrenando el modelo final con TODOS los datos de Entrenamiento.")
+print("-> Evaluando predicciones sobre el 20% de pacientes (Test) que el modelo nunca vio.")
+metricas_test, matriz_test, reporte_test, modelo_final, y_test, proba_test = evaluar_en_test(train, test)
 
-imprimir_metricas("Test final agrupado por id", metricas_test)
+imprimir_metricas("Resultados del Test Final", metricas_test)
+print("  * Recall: Capacidad clave médica de no detectar falsos negativos.")
+print("  * Balanced Acc: Exactitud promedio compensando si hay más sanos que enfermos.")
 
-print("\nMatriz de confusion test:")
-print(matriz_test)
-
-print("\nReporte de clasificacion test:")
+print("\nReporte Detallado de Clasificación:")
 print(reporte_test)
 
+print("\n" + "="*80)
+print(" 5. INTERPRETACIÓN VISUAL DE RESULTADOS ")
+print("="*80)
+
+print("\n-> GRAFICANDO: Matriz de Confusión (Test).")
+print("   (Muestra los Verdaderos Positivos/Negativos y los Falsos Positivos/Negativos)")
+graficar_matriz_confusion(matriz_test, titulo="Matriz de Confusion (Test Final)")
+
+print("\n-> GRAFICANDO: Curva ROC.")
+print("   (Muestra la calidad del modelo: más cerca de la esquina superior izquierda = mejor)")
+graficar_curva_roc(y_test, proba_test, titulo="Curva ROC (Test Final)")
+
 x_train, _, _ = separar_variables(train)
-mostrar_importancias(modelo_final, x_train.columns)
+ranking = mostrar_importancias(modelo_final, x_train.columns)
+
+print("\n-> GRAFICANDO: Importancia de Variables (Top Biomarcadores).")
+print("   (Muestra qué características acústicas ayudaron más a detectar la enfermedad)")
+graficar_importancia_variables(ranking)
