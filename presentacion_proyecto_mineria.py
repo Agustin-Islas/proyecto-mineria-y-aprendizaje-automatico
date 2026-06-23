@@ -141,6 +141,39 @@ def plot_distribucion_train_test(df_stats, titulo):
     plt.tight_layout(); plt.show()
     print("\n")
 
+def plot_mejora_baseline(metricas_base, metricas_final, titulo="Mejora: Baseline vs Final"):
+    labels = ['Balanced Accuracy', 'Recall Control', 'Recall Parkinson', 'ROC AUC']
+    base_vals = [metricas_base['balanced_accuracy'], metricas_base['recall_control'], metricas_base['recall_parkinson'], metricas_base['roc_auc']]
+    final_vals = [metricas_final['balanced_accuracy'], metricas_final['recall_control'], metricas_final['recall_parkinson'], metricas_final['roc_auc']]
+    
+    x = np.arange(len(labels))
+    width = 0.35
+    
+    _, ax = plt.subplots(figsize=(8, 5))
+    rects1 = ax.bar(x - width/2, base_vals, width, label='Baseline (Sujeto, Umbral 0.5)', color='#bdc3c7')
+    rects2 = ax.bar(x + width/2, final_vals, width, label='Final Optimizado', color='#2ecc71')
+    
+    ax.set_ylabel('Score')
+    ax.set_title(titulo)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0, 1.15)
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.2), ncol=2)
+    ax.grid(axis='y', alpha=0.3)
+    
+    for rects in [rects1, rects2]:
+        for rect in rects:
+            height = rect.get_height()
+            ax.annotate(f'{height:.2f}',
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),
+                        textcoords="offset points",
+                        ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.show()
+    print("\n")
+
 """#  PIPELINE DE EJECUCIÓN
 
 # ── PASO 1: Carga y limpieza ──────────────────────────────────────────────────
@@ -253,7 +286,9 @@ def calcular_metricas(y_real, y_pred, y_proba):
         "accuracy":          accuracy_score(y_real, y_pred),
         "balanced_accuracy": balanced_accuracy_score(y_real, y_pred),
         "precision":         precision_score(y_real, y_pred, zero_division=0),
-        "recall":            recall_score(y_real, y_pred, zero_division=0),
+        "recall_global":     recall_score(y_real, y_pred, zero_division=0),
+        "recall_control":    recall_score(y_real, y_pred, pos_label=0, zero_division=0),
+        "recall_parkinson":  recall_score(y_real, y_pred, pos_label=1, zero_division=0),
         "f1":                f1_score(y_real, y_pred, zero_division=0),
         "roc_auc":           roc_auc_score(y_real, y_proba),
     }
@@ -417,3 +452,7 @@ metricas_final, matriz_final, _ = evaluar_por_sujeto(ids_fs, y_fs, proba_fs, umb
 mostrar_metricas(f"Evaluación Final por Sujeto — Top {mejor_k} features · umbral {mejor_umbral:.2f}", metricas_final)
 plot_confusion(matriz_final, f"Matriz de Confusión Final — Top {mejor_k} Features")
 plot_roc(y_fs, proba_fs, f"Curva ROC Final — Top {mejor_k} Features")
+
+# Calculamos el baseline por sujeto para compararlo con el final
+metricas_baseline_sujeto, _, _ = evaluar_por_sujeto(ids_test, y_test, proba_test, umbral=0.5)
+plot_mejora_baseline(metricas_baseline_sujeto, metricas_final, "Mejora del Modelo: Baseline vs Optimizado")
